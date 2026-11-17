@@ -641,6 +641,7 @@ body[data-view=order] .menu .pill{height:40px;padding:0 14px;font-size:15px}
 .ttile .ttb{font-size:30px;font-weight:900;color:var(--brown);line-height:1.1}
 .ttile .tts{font-size:14px;color:var(--muted)}
 .ttile.sales{border-color:#2C6637;background:#E2F1E4}.ttile.sales .ttb{color:#1F6B35}
+.splitrow{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;margin-top:6px}.splitrow>span{display:flex;flex-direction:column;background:rgba(255,255,255,.7);border-radius:12px;padding:10px 12px;min-width:0}.splitrow small{font-weight:800;color:#2C6637;font-size:13px}.splitrow b{font-size:22px;color:#1F2A20}.splitrow em{font-style:normal;font-size:12px;color:#55705A}
 .ttile.live{border-color:var(--brown)}
 .ttile.warn{border-color:#E08A3A;background:#FFF4E8}.ttile.warn .ttb{color:#8A4B0F}
 .oseg{display:none}
@@ -1087,9 +1088,13 @@ function chefsOf(o){ return Array.isArray(o&&o.chefs)?o.chefs:(o&&o.chef?[o.chef
 const andList=a=>a.length<2?a.join(''):a.slice(0,-1).join(', ')+' & '+a[a.length-1];
 function takerOf(t){ const o=S.orders[t]; const w=(S.takenBy&&S.takenBy[t])||(o&&o.waiter)||''; return (w==='Barista'||w==='Owner')?'':w; }
 $main.addEventListener('change',e=>{ if(e.target.id!=='catSel') return; S.cat=e.target.value; e.target.blur(); render(true); const c=[...document.querySelectorAll('.oseg,.catpick')].find(x=>x.offsetParent); if(c) c.scrollIntoView({block:'start'}); });
+function isInhouseBill(b){ return billCh(b)==='inhouse'||!!b.inhouse; }
+function salesSplit(bills){ const cafe=bills.filter(b=>!isInhouseBill(b)&&billCh(b)!=='zomato'), zom=bills.filter(b=>!isInhouseBill(b)&&billCh(b)==='zomato');
+  const s=a=>a.reduce((x,b)=>x+num(b.total),0); const c=s(cafe), z=s(zom);
+  return {cafe:c, zomato:z, total:c+z, cafeN:cafe.length, zomN:zom.length, inh:bills.filter(isInhouseBill).length}; }
 function viewToday(){
   const today=dayKey(), bills=S.billDay===today?(S.dayBills||[]):[];
-  const paid=bills.filter(b=>billCh(b)!=='inhouse'), sales=paid.reduce((a,b)=>a+num(b.total),0);
+  const paid=bills.filter(b=>!isInhouseBill(b)), sp=salesSplit(bills);
   const ords=Object.values(S.orders), prep=ords.filter(waitingKitchen).length, served=ords.filter(o=>o.status==='confirmed'&&(o.served||!needsKitchen(o))).length, ready=ords.filter(o=>o.status==='billed').length, taking=ords.filter(o=>o.status==='open').length;
   const pend=S.purPending||[], pendTot=pend.reduce((a,p)=>a+num(p.total),0);
   const low=S.stock.filter(isLow), working=(S.attToday||[]).filter(r=>r.in&&!r.out).map(r=>r.name);
@@ -1097,7 +1102,9 @@ function viewToday(){
   const tile=(v,cls,icon,title,big,sub)=>`<button type="button" class="ttile ${cls}" data-act="nav" data-v="${v}"><span class="tti">${icon}</span><span class="ttt">${title}</span><b class="ttb num">${big}</b><span class="tts">${sub}</span></button>`;
   return `<div class="pagehead"><h1>${hi} 👋</h1><span class="muted">${esc(fmtDay(today,true))}</span></div>
     <div class="ttiles">
-      ${tile('bills','sales','💰','Sales today',money(sales),paid.length+' bill'+(paid.length===1?'':'s')+' paid')}
+      <button type="button" class="ttile sales" data-act="nav" data-v="sales" style="grid-column:1/-1;min-height:0"><span class="tti">💰</span><span class="ttt">Sales today · Café + Zomato</span><b class="ttb num">${money(sp.total)}</b>
+        <span class="splitrow"><span><small>☕ Café sales</small><b class="num">${money(sp.cafe)}</b><em>Dine-in + Takeaway · ${sp.cafeN} bill${sp.cafeN===1?'':'s'}</em></span><span><small>🛵 Zomato sales</small><b class="num">${money(sp.zomato)}</b><em>${sp.zomN} order${sp.zomN===1?'':'s'}</em></span></span>
+        ${sp.inh?`<span class="tts">In-house: ${sp.inh} (not counted in sales)</span>`:''}</button>
       ${tile('kitchen','live','🍳','Orders right now',String(prep+served+ready+taking),`🟠 ${prep} preparing · 🟢 ${served} served · 🔵 ${ready} bill ready`)}
       ${tile('purchases',pend.length?'warn':'','🛒','Bills to pay',money(pendTot),pend.length?pend.length+' pending purchase bill'+(pend.length===1?'':'s'):'Nothing pending')}
       ${tile('stock',low.length?'warn':'','📦','Low stock',String(low.length),low.length?esc(low.slice(0,3).map(i=>i.name).join(', '))+(low.length>3?' …':''):'All good')}
@@ -1174,8 +1181,8 @@ function delta(cur,prev,lbl){
 function viewSales(){
   const R=computeRange();
   const all=S.bills;
-  const inRange=all.filter(b=>b.day>=R.from&&b.day<=R.to); const inh=inRange.filter(b=>billCh(b)==='inhouse');
-  const cur=inRange.filter(b=>billCh(b)!=='inhouse'), prev=all.filter(b=>b.day>=R.prevFrom&&b.day<=R.prevTo&&billCh(b)!=='inhouse');
+  const inRange=all.filter(b=>b.day>=R.from&&b.day<=R.to); const inh=inRange.filter(isInhouseBill);
+  const cur=inRange.filter(b=>!isInhouseBill(b)), prev=all.filter(b=>b.day>=R.prevFrom&&b.day<=R.prevTo&&!isInhouseBill(b));
   const sum=(arr,f)=>arr.reduce((a,b)=>a+f(b),0);
   const sales=sum(cur,b=>num(b.total)), psales=sum(prev,b=>num(b.total));
   const items=sum(cur,b=>sum(b.items||[],i=>num(i.qty))), pitems=sum(prev,b=>sum(b.items||[],i=>num(i.qty)));
@@ -1220,7 +1227,9 @@ function viewSales(){
   else if(!cur.length) body=`<div class="empty">No paid bills for ${esc(label)}. Bills appear here when a barista taps “Mark as paid”.</div>`;
   else body=`
     <div class="stats">
-      <div class="stat"><div class="k">Total sales</div><div class="v num">${money(sales)}</div>${delta(sales,psales,cmp)}</div>
+      <div class="stat"><div class="k">☕ Café sales</div><div class="v num">${money(salesSplit(cur).cafe)}</div><div class="muted" style="font-size:13px">Dine-in + Takeaway · ${salesSplit(cur).cafeN} bills</div></div>
+      <div class="stat"><div class="k">🛵 Zomato sales</div><div class="v num">${money(salesSplit(cur).zomato)}</div><div class="muted" style="font-size:13px">${salesSplit(cur).zomN} orders</div></div>
+      <div class="stat"><div class="k">Total (Café + Zomato)</div><div class="v num">${money(sales)}</div>${delta(sales,psales,cmp)}</div>
       <div class="stat"><div class="k">Bills</div><div class="v num">${cur.length}</div>${delta(cur.length,prev.length,cmp)}</div>
       <div class="stat"><div class="k">Average bill</div><div class="v num">${money(avg)}</div>${delta(avg,pavg,cmp)}</div>
       <div class="stat"><div class="k">Items sold</div><div class="v num">${items}</div>${delta(items,pitems,cmp)}</div>
